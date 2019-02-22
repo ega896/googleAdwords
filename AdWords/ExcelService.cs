@@ -21,89 +21,120 @@ namespace AdWords
 
         public string Execute(ProgressBar pb)
         {
-            var adWords = ReadFile(_fileName).ToList();
+            var adGroups = ReadFile(_fileName).ToList();
 
-            pb.Maximum = adWords.Count;
+            pb.Maximum = adGroups.Count;
 
-            var resultCollection = new List<string>();
+            var adGroupsResult = new List<AdGroupResult>();
             ICollection<BannedCombination> bannedCombinations = new List<BannedCombination>();
 
-            foreach (var adWord in adWords)
+            foreach (var adGroup in adGroups)
             {
-                if (adWord.IsIgnored)
+                ICollection<string> wordsToRemoveFromGroup = new List<string>();
+
+                foreach (var adWord in adGroup.AdWords)
                 {
-                    resultCollection.Add("");
-                    pb.Increment(1);
-                    continue;
-                }
-
-                ICollection<string> wordsToRemove = new List<string>();
-
-                var adWordsWithoutItem = adWords.Where(x => !x.Equals(adWord) && !x.IsIgnored).ToList();
-
-                if (adWord.MatchType == MatchType.BroadMatchModifier)
-                {
-                    foreach (var checkItem in adWordsWithoutItem)
+                    if (adWord.IsIgnored)
                     {
-                        wordsToRemove.AddWords(bannedCombinations, checkItem.Value, adWord.Value);
+                        adGroupsResult.Add(new AdGroupResult { Name = adGroup.Name, NegativeWords = "" });
+                        continue;
+                    }
 
-                        if (checkItem.Value != adWord.Value || wordsToRemove.Contains(checkItem.Value)) continue;
+                    ICollection<string> wordsToRemove = new List<string>();
+                    var adWordsWithoutItem = adGroups.Where(x => !x.Equals(adGroup)).SelectMany(x => x.AdWords).Where(x => !x.IsIgnored).ToList();
 
-                        switch (checkItem.MatchType)
+                    if (adWord.MatchType == MatchType.BroadMatchModifier)
+                    {
+                        foreach (var checkItem in adWordsWithoutItem)
                         {
-                            case MatchType.ExactMatch:
+                            wordsToRemove.AddWords(bannedCombinations, checkItem.Value, adWord.Value);
+
+                            if (checkItem.Value != adWord.Value || wordsToRemove.Contains(checkItem.Value)) continue;
+
+                            switch (checkItem.MatchType)
+                            {
+                                case MatchType.ExactMatch:
+                                    wordsToRemove.Add($"[{checkItem.Value}]");
+                                    break;
+                                case MatchType.PhraseMatch:
+                                    wordsToRemove.Add($"\"{checkItem.Value}\"");
+                                    break;
+                            }
+                        }
+                    }
+                    else if (adWord.MatchType == MatchType.PhraseMatch)
+                    {
+                        foreach (var checkItem in adWordsWithoutItem)
+                        {
+                            wordsToRemove.AddWords(bannedCombinations, checkItem.Value, adWord.Value);
+
+                            if (checkItem.MatchType == MatchType.ExactMatch && checkItem.Value == adWord.Value &&
+                                !wordsToRemove.Contains(checkItem.Value))
+                            {
                                 wordsToRemove.Add($"[{checkItem.Value}]");
-                                break;
-                            case MatchType.PhraseMatch:
-                                wordsToRemove.Add($"\"{checkItem.Value}\"");
-                                break;
+                            }
                         }
                     }
-                }
-                else if (adWord.MatchType == MatchType.PhraseMatch)
-                {
-                    foreach (var checkItem in adWordsWithoutItem)
+                    else if (adWord.MatchType == MatchType.ExactMatch)
                     {
-                        wordsToRemove.AddWords(bannedCombinations, checkItem.Value, adWord.Value);
+                        adWordsWithoutItem = adWordsWithoutItem.Where(x => !(x.MatchType == MatchType.PhraseMatch || x.MatchType == MatchType.BroadMatchModifier
+                        && Helper.CheckPhrasesEquality(x.Value, adWord.Value))).ToList();
 
-                        if (checkItem.MatchType == MatchType.ExactMatch && checkItem.Value == adWord.Value &&
-                            !wordsToRemove.Contains(checkItem.Value))
+                        foreach (var checkItem in adWordsWithoutItem)
                         {
-                            wordsToRemove.Add($"[{checkItem.Value}]");
+                            wordsToRemove.AddWords(bannedCombinations, checkItem.Value, adWord.Value);
                         }
                     }
-                }
-                else if (adWord.MatchType == MatchType.ExactMatch)
-                {
-                    adWordsWithoutItem = adWordsWithoutItem.Where(x => !(x.MatchType == MatchType.PhraseMatch || x.MatchType == MatchType.BroadMatchModifier && Helper.CheckPhrasesEquality(x.Value, adWord.Value))).ToList();
 
-                    foreach (var checkItem in adWordsWithoutItem)
+                    foreach (var word in wordsToRemove)
                     {
-                        wordsToRemove.AddWords(bannedCombinations, checkItem.Value, adWord.Value);
+                        if (wordsToRemoveFromGroup.All(x => !Helper.CheckPhrasesEquality(x, word))) wordsToRemoveFromGroup.Add(word);
                     }
                 }
 
-                resultCollection.Add(string.Join(Environment.NewLine, wordsToRemove).TrimEnd());
+                adGroupsResult.Add(new AdGroupResult
+                {
+                    Name = adGroup.Name,
+                    NegativeWords = string.Join(Environment.NewLine, wordsToRemoveFromGroup.Where(x => !adGroup.AdWords.Any(y => Helper.CheckPhrasesEquality(y.Value, x)))).TrimEnd()
+                });
+
                 pb.Increment(1);
             }
 
-            WriteRows(_fileName, resultCollection);
+            WriteRows(_fileName, adGroupsResult);
 
             return "Done";
         }
 
-        private IEnumerable<AdWord> ReadFile(string filePath)
+        private IEnumerable<AdGroup> ReadFile(string filePath)
         {
             var existingFile = new FileInfo(filePath);
-            var adWords = new List<AdWord>();
+
+            var adGroups = new List<AdGroup>();
 
             using (var package = new ExcelPackage(existingFile))
             {
                 var worksheet = package.Workbook.Worksheets[1];
-                int rowCount = worksheet.Dimension.End.Row;
 
-                for (int row = 3; row <= rowCount; row++)
+                int dColumnRowCount = worksheet.Cells["D3:D"].Count(c => c.Value != null);
+                WordsToRemove = new List<string>();
+                for (int row = 3; row <= dColumnRowCount + 2; row++)
                 {
+                    WordsToRemove.Add(worksheet.Cells[row, 4].Value.ToString().Trim().ToLowerInvariant());
+                }
+
+                int fColumnRowCount = worksheet.Cells["F3:F"].Count(c => c.Value != null);
+                Helper.HighPriorityWords = new Dictionary<int, string>();
+                for (int row = 3; row <= fColumnRowCount + 2; row++)
+                {
+                    Helper.HighPriorityWords.Add(row - 1, worksheet.Cells[row, 6].Value.ToString().Trim().ToLowerInvariant());
+                }
+
+                int aColumnRowCount = worksheet.Cells["A3:A"].Count(c => c.Value != null);
+                for (int row = 3; row <= aColumnRowCount + 2; row++)
+                {
+                    var adWord = new AdWord();
+
                     if (worksheet.Cells[row, 2].Value != null)
                     {
                         var value = worksheet.Cells[row, 2].Value.ToString().Trim().ToLowerInvariant();
@@ -121,44 +152,59 @@ namespace AdWords
                             matchType = MatchType.BroadMatchModifier;
                         }
 
-                        var adWord = new AdWord
-                        {
-                            Value = StringWordsRemove(value.Replace("+", string.Empty)
-                                .Replace("[", string.Empty)
-                                .Replace("]", string.Empty)
-                                .Replace("\"", string.Empty)),
-                            MatchType = matchType
-                        };
-                        adWord.IsIgnored = adWords.Contains(adWord, new AdWordEqualityComparer());
+                        adWord.Value = StringWordsRemove(value.Replace("+", string.Empty)
+                            .Replace("[", string.Empty)
+                            .Replace("]", string.Empty)
+                            .Replace("\"", string.Empty));
 
-                        adWords.Add(adWord);
+                        adWord.MatchType = matchType;
+                        adWord.IsIgnored = adGroups.SelectMany(x => x.AdWords)
+                            .Contains(adWord, new AdWordEqualityComparer());
                     }
-                    if (worksheet.Cells[row, 4].Value != null)
+
+                    var groupName = worksheet.Cells[row, 1].Value.ToString().ToLower();
+
+                    if (adGroups.Any(x => x.Name == groupName))
                     {
-                        WordsToRemove.Add(worksheet.Cells[row, 4].Value.ToString().Trim().ToLowerInvariant());
+                        adGroups.First(x => x.Name == groupName).AdWords.Add(adWord);
                     }
-                    if (worksheet.Cells[row, 6].Value != null)
+                    else
                     {
-                        Helper.HighPriorityWords.Add(row - 1, worksheet.Cells[row, 6].Value.ToString().Trim().ToLowerInvariant());
+                        adGroups.Add(new AdGroup
+                        {
+                            Name = groupName,
+                            AdWords = new List<AdWord>
+                                {
+                                    adWord
+                                }
+                        });
                     }
                 }
             }
 
-            return adWords;
+            return adGroups;
         }
 
-        private void WriteRows(string filePath, ICollection<string> collection)
+        private void WriteRows(string filePath, IEnumerable<AdGroupResult> adGroupResults)
         {
             var existingFile = new FileInfo(filePath);
             using (var package = new ExcelPackage(existingFile))
             {
                 var worksheet = package.Workbook.Worksheets[1];
-                worksheet.Cells[1, 3].Value = "Negative words";
+                int rowsCount = worksheet.Cells["A3:A"].Count(c => c.Value != null) + 2;
 
-                for (int i = 3; i < collection.Count + 3; i++)
+                worksheet.Cells[1, 3].Value = "Negative words";
+                foreach (var adGroupResult in adGroupResults)
                 {
-                    worksheet.Cells[i, 3].Style.WrapText = true;
-                    worksheet.Cells[i, 3].Value = collection.ElementAtOrDefault(i - 3);
+                    var intArray = worksheet.Cells[$"A3:A{rowsCount}"]
+                        .Where(x => x.Value != null && x.Value.ToString().ToLowerInvariant() == adGroupResult.Name)
+                        .Select(x => int.Parse(Regex.Match(x.Address, @"\d+").Value)).ToArray();
+
+                    worksheet.Cells[intArray.Min(), 3, intArray.Max(), 3].Merge = true;
+                    var mergedCells = worksheet.MergedCells[intArray.Max(), 3];
+
+                    worksheet.Cells[mergedCells].Style.WrapText = true;
+                    worksheet.Cells[mergedCells].Value = adGroupResult.NegativeWords;
                 }
 
                 package.Save();

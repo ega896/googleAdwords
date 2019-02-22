@@ -15,6 +15,7 @@ namespace AdWords
         {
             var result = openFileDialog.ShowDialog();
             var extension = Path.GetExtension(openFileDialog.FileName);
+
             if (result == DialogResult.OK)
             {
                 if (extension != ".xlsx" && extension != ".xls")
@@ -28,22 +29,21 @@ namespace AdWords
                 progressBar.Value = 0;
                 doneLabel.Text = null;
             }
-            else
-            {
-                MessageBox.Show(@"Unexpected error. Please try again");
-            }
         }
 
         private void executeButton_Click(object sender, EventArgs e)
         {
             try
             {
+                progressBar.Value = 0;
+                doneLabel.Text = null;
+
                 var excelService = new ExcelService(filePathLabel.Text);
                 doneLabel.Text = excelService.Execute(progressBar);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                MessageBox.Show(@"Unexpected error. Please try again");
+                MessageBox.Show(ex.ToString());
             }
         }
     }
