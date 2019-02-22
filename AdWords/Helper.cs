@@ -1,8 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
-using System.Text.RegularExpressions;
 
-namespace Console
+namespace AdWords
 {
     public static class Helper
     {
@@ -63,8 +62,8 @@ namespace Console
 
         public static bool CheckPhrasesEquality(string phrase1, string phrase2)
         {
-            var phrase1Words = phrase1.Split(" ");
-            var phrase2Words = phrase2.Split(" ");
+            var phrase1Words = phrase1.Split(' ');
+            var phrase2Words = phrase2.Split(' ');
 
             return phrase1Words.Intersect(phrase2Words).Count() == phrase1Words.Length &&
                    phrase2Words.Intersect(phrase1Words).Count() == phrase2Words.Length;

@@ -3,17 +3,27 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Windows.Forms;
 using OfficeOpenXml;
 
-namespace Console
+namespace AdWords
 {
-    public class Program
+    public class ExcelService
     {
-        public static void Main(string[] args)
+        private readonly string _fileName;
+
+        public static ICollection<string> WordsToRemove = new List<string>();
+
+        public ExcelService(string fileName)
         {
-            System.Console.WriteLine("Enter filepath: ");
-            var filePath = System.Console.ReadLine();
-            var adWords = ReadFile(filePath).ToList();
+            _fileName = fileName;
+        }
+
+        public string Execute(ProgressBar pb)
+        {
+            var adWords = ReadFile(_fileName).ToList();
+
+            pb.Maximum = adWords.Count;
 
             var resultCollection = new List<string>();
             ICollection<BannedCombination> bannedCombinations = new List<BannedCombination>();
@@ -23,6 +33,7 @@ namespace Console
                 if (adWord.IsIgnored)
                 {
                     resultCollection.Add("");
+                    pb.Increment(1);
                     continue;
                 }
 
@@ -73,22 +84,22 @@ namespace Console
                 }
 
                 resultCollection.Add(string.Join(Environment.NewLine, wordsToRemove).TrimEnd());
+                pb.Increment(1);
             }
 
-            WriteRows(filePath, resultCollection);
+            WriteRows(_fileName, resultCollection);
 
-            System.Console.WriteLine("done");
-            System.Console.ReadKey();
+            return "Done";
         }
 
-        public static IEnumerable<AdWord> ReadFile(string filePath)
+        private IEnumerable<AdWord> ReadFile(string filePath)
         {
             var existingFile = new FileInfo(filePath);
             var adWords = new List<AdWord>();
 
             using (var package = new ExcelPackage(existingFile))
             {
-                var worksheet = package.Workbook.Worksheets[0];
+                var worksheet = package.Workbook.Worksheets[1];
                 int rowCount = worksheet.Dimension.End.Row;
 
                 for (int row = 3; row <= rowCount; row++)
@@ -128,7 +139,7 @@ namespace Console
                     }
                     if (worksheet.Cells[row, 6].Value != null)
                     {
-                        Helper.HighPriorityWords.Add(row-1, worksheet.Cells[row, 6].Value.ToString().Trim().ToLowerInvariant());
+                        Helper.HighPriorityWords.Add(row - 1, worksheet.Cells[row, 6].Value.ToString().Trim().ToLowerInvariant());
                     }
                 }
             }
@@ -136,29 +147,23 @@ namespace Console
             return adWords;
         }
 
-        public static IDictionary<string, string> WriteRows(string filePath, ICollection<string> collection)
+        private void WriteRows(string filePath, ICollection<string> collection)
         {
             var existingFile = new FileInfo(filePath);
-            var result = new Dictionary<string, string>();
-
             using (var package = new ExcelPackage(existingFile))
             {
-                var worksheet = package.Workbook.Worksheets[0];
+                var worksheet = package.Workbook.Worksheets[1];
                 worksheet.Cells[1, 3].Value = "Negative words";
 
                 for (int i = 3; i < collection.Count + 3; i++)
                 {
                     worksheet.Cells[i, 3].Style.WrapText = true;
-                    worksheet.Cells[i, 3].Value = collection.ElementAtOrDefault(i-3);                 
+                    worksheet.Cells[i, 3].Value = collection.ElementAtOrDefault(i - 3);
                 }
 
                 package.Save();
             }
-
-            return result;
         }
-
-        public static ICollection<string> WordsToRemove = new List<string>();
 
         public static string StringWordsRemove(string stringToClean)
         {

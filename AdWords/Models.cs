@@ -1,4 +1,4 @@
-﻿namespace Console
+﻿namespace AdWords
 {
     public class AdWord
     {
